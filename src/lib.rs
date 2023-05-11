@@ -48,10 +48,10 @@
 //! - Linear equations Ax = b for x solution
 //!
 
+use ark_ec::CurveGroup;
+use ark_ff::Field;
 use core::ops::{Add, Mul, Sub};
 use std::fmt;
-
-use ark_ff::Field;
 
 #[derive(Debug, Clone)]
 pub struct Matrix<F: Field> {
@@ -168,6 +168,14 @@ impl<F: Field> Mul<Matrix<F>> for Matrix<F> {
         }
 
         result
+    }
+}
+
+impl<F: Field> std::ops::Deref for Matrix<F> {
+    type Target = Vec<Vec<F>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.matrix
     }
 }
 
@@ -524,6 +532,35 @@ impl<F: Field> Matrix<F> {
         result
     }
 
+    /// Multiplies the matrix by a vector of group elements.
+    /// ## Example
+    /// ```
+    /// let c: Vec<F> = a.mul_vec_group(b);
+    /// ```
+    /// ## Panics
+    /// Panics if the number of rows in the matrix is not equal to the number of elements in the vector.
+    /// ## Notes
+    /// This function is equivalent to multiplying the matrix by a column vector.
+    /// This is specific function that utilizes msm rather than simple for loop multiplication
+    pub fn mul_vec_group<C>(self, vec: &[C::Affine]) -> Vec<C>
+    where
+        C: CurveGroup<ScalarField = F>,
+    {
+        assert_eq!(
+            vec.len(),
+            self.matrix.len(),
+            "Vector and matrix can't be multiplied by the other"
+        );
+
+        let mut result = Vec::with_capacity(self.matrix.first().unwrap().len());
+
+        for i in 0..self.matrix.first().unwrap().len() {
+            result.push(C::msm(vec, &self.matrix[i]).unwrap())
+        }
+
+        result
+    }
+
     /// Returns the sum of all the elements in the matrix.
     /// ## Example
     /// ```
@@ -613,6 +650,7 @@ impl<F: Field> Matrix<F> {
 mod tests {
     use super::Matrix;
 
+    use ark_ec::CurveGroup;
     use ark_ff::{Fp64, MontBackend};
 
     #[test]
@@ -1004,5 +1042,26 @@ mod tests {
         assert_eq!(a.get_element(0, 1), F::from(2));
         assert_eq!(a.get_element(1, 0), F::from(3));
         assert_eq!(a.get_element(1, 1), F::from(4));
+    }
+
+    #[test]
+    fn test_mul_vec_with_group() {
+        use ark_ec::Group;
+        use ark_secp256k1::{Fr as F, Projective as C};
+
+        let a: Matrix<F> = Matrix::new(vec![
+            vec![F::from(1), F::from(2)],
+            vec![F::from(3), F::from(4)],
+        ]);
+
+        let b = vec![
+            (C::generator() * F::from(1)).into_affine(),
+            (C::generator() * F::from(2)).into_affine(),
+        ];
+        let c: Vec<C> = a.mul_vec_group(&b);
+        assert_eq!(
+            c,
+            [C::generator() * F::from(5), C::generator() * F::from(11)]
+        )
     }
 }
